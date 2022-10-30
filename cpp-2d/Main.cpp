@@ -145,14 +145,15 @@ int main()
 	playerTexture.loadFromFile(getCurrentDirectory() + "/player.png");
 	playerSprite.setTexture(playerTexture);
 	playerBody = CreateRectangle(300 / BOX2D_SCALE, 100 / BOX2D_SCALE, 31 / BOX2D_SCALE / 2, 49 / BOX2D_SCALE / 2, b2_dynamicBody);
-	
+	playerBody->SetFixedRotation(true);
+
 	while (window->isOpen())
 	{
 		// Update Physics World
 		physicsWorld->Step(1.f / 60.f, 6, 2);	
 
 		// Update Player sprite position with physics
-		playerSprite.setPosition(playerBody->GetPosition().x * BOX2D_SCALE - 31 / 2.f, playerBody->GetPosition().y * BOX2D_SCALE - 49 / 2.f);
+		playerSprite.setPosition(playerBody->GetPosition().x * BOX2D_SCALE - 31 / 2.f - cameraPosition.x, playerBody->GetPosition().y * BOX2D_SCALE - 49 / 2.f - cameraPosition.y);
 
 		// Clear Screen
 		window->clear();
