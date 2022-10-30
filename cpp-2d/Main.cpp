@@ -13,6 +13,8 @@ b2World* physicsWorld;
 sf::RenderWindow* window;
 SFMLDebugDraw* debugDraw;
 sf::Vector2f cameraPosition;
+sf::Sprite playerSprite;
+b2Body* playerBody;
 
 bool qKeyFlag = true;
 
@@ -87,6 +89,16 @@ void HandleEvents()
 		}
 	}
 
+	// Move Player
+	{
+		if (sf::Keyboard::isKeyPressed(sf::Keyboard::A))
+			playerBody->SetLinearVelocity(b2Vec2(playerBody->GetLinearVelocity().x  -1, playerBody->GetLinearVelocity().y));
+		if (sf::Keyboard::isKeyPressed(sf::Keyboard::D))
+			playerBody->SetLinearVelocity(b2Vec2(playerBody->GetLinearVelocity().x + 1, playerBody->GetLinearVelocity().y));
+		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Space))
+			playerBody->SetLinearVelocity(b2Vec2(playerBody->GetLinearVelocity().x, playerBody->GetLinearVelocity().y - 5));
+	}
+
 	// Camera movement
 	{
 		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
@@ -127,17 +139,29 @@ int main()
 	// Create Debug Draw
 	debugDraw = new SFMLDebugDraw(window, physicsWorld, sf::Color::Red);
 	debugDraw->setEnabled(true);
+
+	// Create Player
+	sf::Texture playerTexture;
+	playerTexture.loadFromFile(getCurrentDirectory() + "/player.png");
+	playerSprite.setTexture(playerTexture);
+	playerBody = CreateRectangle(300 / BOX2D_SCALE, 100 / BOX2D_SCALE, 31 / BOX2D_SCALE / 2, 49 / BOX2D_SCALE / 2, b2_dynamicBody);
 	
 	while (window->isOpen())
 	{
 		// Update Physics World
-		physicsWorld->Step(1.f / 60.f, 6, 2);		
+		physicsWorld->Step(1.f / 60.f, 6, 2);	
+
+		// Update Player sprite position with physics
+		playerSprite.setPosition(playerBody->GetPosition().x * BOX2D_SCALE - 31 / 2.f, playerBody->GetPosition().y * BOX2D_SCALE - 49 / 2.f);
 
 		// Clear Screen
 		window->clear();
 
 		// Render DebugDraw
 		debugDraw->Render(cameraPosition);
+
+		// Render Player
+		window->draw(playerSprite);
 
 		// Render Everything
 		window->display();
