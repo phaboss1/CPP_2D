@@ -133,6 +133,9 @@
     <ClCompile Include="SFMLDebugDraw.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Client.hpp" />
+    <ClInclude Include="Network.hpp" />
+    <ClInclude Include="Server.hpp" />
     <ClInclude Include="SFMLDebugDraw.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

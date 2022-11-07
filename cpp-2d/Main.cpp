@@ -1,9 +1,17 @@
 #include <iostream>
+
 #include <SFML/Graphics.hpp>
 #include <box2d/box2d.h>
+
 #include <Windows.h>
+#include <stdlib.h>
+#include <time.h>
 
 #include "SFMLDebugDraw.hpp"
+#include "Server.hpp"
+#include "Client.hpp"
+
+
 
 using namespace std;
 
@@ -17,6 +25,16 @@ sf::Sprite playerSprite;
 b2Body* playerBody;
 
 bool qKeyFlag = true;
+
+std::string getRandomString()
+{
+	srand((unsigned int)time(NULL));
+
+	std::string retVal;
+	for (int i = 0; i < 5; i++)
+		retVal += (char)(rand() % 25 + 65);
+	return retVal;
+}
 
 string getCurrentDirectory()
 {
@@ -123,6 +141,9 @@ void HandleEvents()
 
 int main()
 {
+	Server::Init(53000);
+	Client::Init(getRandomString(), "123321", "127.0.0.1", 53000);
+
 	// Set camera to 0,0
 	cameraPosition.x = 0;
 	cameraPosition.y = 0;
@@ -173,6 +194,9 @@ int main()
 		// Wait 16ms for 60 fps
 		sf::sleep(sf::milliseconds(16));
 	}
+
+	Server::DeInit();
+	Client::DeInit();
 
 	return 0;
 }
