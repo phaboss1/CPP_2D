@@ -9,6 +9,7 @@ class RemoteClient {
 public:
 	sf::TcpSocket* socket;
 	std::string username;
+	b2Body* body;
 
 	RemoteClient()
 	{
@@ -51,7 +52,7 @@ public:
 
 		if (tcpStatus == sf::Socket::Done)
 		{
-			world = new b2World(b2Vec2(0, 0));
+			world = new b2World(b2Vec2(0, 9.8f));
 			serverGameCallback = cbk;
 			state = RUNNING;
 			tcpAuthenticatorTh = std::thread(Server::TCPAuthenticator);
@@ -133,6 +134,9 @@ public:
 				{
 					authenticatedClientsMutex.lock();
 					authenticatedClients.push_back(client);
+					// Call cbk
+					serverGameCallback->OnAuth(client);
+					client->socket->setBlocking(false);
 					authenticatedClientsMutex.unlock();
 					std::cout << "[Server][Info] Successfully auth a client..." << std::endl;
 				}
@@ -180,10 +184,6 @@ public:
 
 				responsePacket << isAuth;
 				client->socket->send(responsePacket);
-
-				// Call cbk
-				serverGameCallback->OnAuth(client);
-				client->socket->setBlocking(false);
 
 				return isAuth;
 			}

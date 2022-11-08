@@ -34,6 +34,22 @@ public:
 		return uD;
 	}
 
+	static b2Body* CreateRectangle(b2World* world, float xPos, float yPos, float width, float height, b2BodyType type)
+	{
+		// Create Ground
+		b2BodyDef bodyDef;
+		bodyDef.position.Set(xPos, yPos);
+		bodyDef.type = type;
+
+		b2Body* rectangleBody = world->CreateBody(&bodyDef);
+
+		b2PolygonShape polygonShape;
+		polygonShape.SetAsBox(width, height);
+		rectangleBody->CreateFixture(&polygonShape, 1.0f);
+
+		return rectangleBody;
+	}
+
 	static void PushBodyAndFixtureCreation(b2Body* bodyIter, sf::Packet& worldInit)
 	{
 		// Push Body related data

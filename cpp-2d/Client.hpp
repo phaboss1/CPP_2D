@@ -62,7 +62,10 @@ public:
 
 	static void Update()
 	{
-
+		if (Client::state == RUNNING)
+		{
+			world->Step(1.f / 60.f, 6, 2);
+		}
 	}
 
 	static void TCPListener()

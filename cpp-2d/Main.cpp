@@ -10,21 +10,7 @@
 #include "Client.hpp"
 #include "Box2DUtils.hpp"
 
-b2Body* CreateRectangle(b2World* world, float xPos, float yPos, float width, float height, b2BodyType type)
-{
-	// Create Ground
-	b2BodyDef bodyDef;
-	bodyDef.position.Set(xPos, yPos);
-	bodyDef.type = type;
 
-	b2Body* rectangleBody = world->CreateBody(&bodyDef);
-
-	b2PolygonShape polygonShape;
-	polygonShape.SetAsBox(width, height);
-	rectangleBody->CreateFixture(&polygonShape, 1.0f);
-
-	return rectangleBody;
-}
 
 
 class ServerGame : public gServer_cbk_interface {
@@ -36,7 +22,7 @@ public:
 
 		if (Server::state == RUNNING)
 		{
-			CreateRectangle(Server::world, 15, 18, 7, 1.f, b2_staticBody);
+			Box2DUtils::CreateRectangle(Server::world, 15, 18, 7, 1.f, b2_staticBody);
 		}
 	}
 
@@ -52,11 +38,17 @@ public:
 
 	void OnAuth(RemoteClient* client)
 	{
-		std::cout << "a client auth to server" << std::endl;
+		while (Server::world->IsLocked());
+		client->body = Box2DUtils::CreateRectangle(Server::world, 300 / BOX2D_SCALE, 100 / BOX2D_SCALE, 31 / BOX2D_SCALE / 2, 49 / BOX2D_SCALE / 2, b2_dynamicBody);
+		for (RemoteClient* c : Server::authenticatedClients)
+		{
+			/*sf::Packet p;
+			c->socket->send();*/
+		}
 
 		sf::Packet worldInit;
 		worldInit << PACKET_TYPE_WORLD_INIT;
-		worldInit << 0.f << 0.f; // gravity
+		worldInit << 0.f << 9.8f; // gravity
 
 		worldInit << Server::world->GetBodyCount();
 
