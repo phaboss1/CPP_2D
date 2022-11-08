@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Network.hpp"
+#include <box2d/box2d.h>
 
 
 
@@ -20,6 +21,13 @@ public:
 	}
 };
 
+class gServer_cbk_interface {
+public:
+	virtual void OnAuth(RemoteClient* client) = 0;
+	virtual void OnPacket(RemoteClient* client, sf::Packet* packet) = 0;
+
+};
+
 
 class Server {
 public:
@@ -29,8 +37,10 @@ public:
 	static std::thread tcpListenerTh;
 	static std::vector<RemoteClient*> authenticatedClients;
 	static std::mutex authenticatedClientsMutex;
+	static gServer_cbk_interface* serverGameCallback;
+	static b2World* world;
 
-	static bool Init(const int tcpPort)
+	static bool Init(const int tcpPort, gServer_cbk_interface* cbk)
 	{
 		if (state != DEINIT)
 			return false;
@@ -41,6 +51,8 @@ public:
 
 		if (tcpStatus == sf::Socket::Done)
 		{
+			world = new b2World(b2Vec2(0, 0));
+			serverGameCallback = cbk;
 			state = RUNNING;
 			tcpAuthenticatorTh = std::thread(Server::TCPAuthenticator);
 			tcpListenerTh = std::thread(Server::TCPListener);
@@ -51,6 +63,14 @@ public:
 			std::cout << "[Server][Error] TCP port already in bound!" << std::endl;
 			state = DEINIT;
 			return false;
+		}
+	}
+
+	static void Update()
+	{
+		if (Server::state == RUNNING)
+		{
+			world->Step(1.f / 60.f, 6, 2);
 		}
 	}
 
@@ -71,32 +91,14 @@ public:
 			authenticatedClientsMutex.lock();
 			for (std::vector<RemoteClient*>::iterator iter = authenticatedClients.begin(); iter != authenticatedClients.end(); )
 			{
-				RemoteClient* rClient = *iter;
+				RemoteClient* client = *iter;
 				sf::Packet receivedPacket;
-				sf::Socket::Status receiveStatus = rClient->socket->receive(receivedPacket);
-
-				if(broadcast)
-				{
-					sf::Packet broadcastMsg;
-					broadcastMsg << PACKET_TYPE_BROADCAST;
-					broadcastMsg << "aq cocu";
-					rClient->socket->send(broadcastMsg);
-				}
+				sf::Socket::Status receiveStatus = client->socket->receive(receivedPacket);
 
 				if (receiveStatus == sf::Socket::Done)
 				{
-					int packetType;
-					receivedPacket >> packetType;
-					if (packetType == PACKET_TYPE_BROADCAST)
-					{
-						std::string msg;
-						receivedPacket >> msg;
-						std::cout << "[Server][Info] A broadcast packet received from the client " << rClient->username << " with message " << msg << "!" << std::endl;
-					}
-					else 
-					{
-						std::cout << "[Server][Info] unkown packet!" << std::endl;
-					}
+					serverGameCallback->OnPacket(client, &receivedPacket);
+
 					iter++;
 				}
 				else if (receiveStatus == sf::Socket::NotReady)
@@ -107,7 +109,7 @@ public:
 				{
 					std::cout << "[Server][Info] Connection lost with a client..." << std::endl;
 					// Disconnected probably
-					delete rClient;
+					delete client;
 					iter = authenticatedClients.erase(iter);
 				}
 
@@ -169,7 +171,6 @@ public:
 				{
 					isAuth = true;
 					client->username = uname;
-					client->socket->setBlocking(false);
 				}
 				else 
 				{
@@ -179,6 +180,10 @@ public:
 
 				responsePacket << isAuth;
 				client->socket->send(responsePacket);
+
+				// Call cbk
+				serverGameCallback->OnAuth(client);
+				client->socket->setBlocking(false);
 
 				return isAuth;
 			}
@@ -216,3 +221,5 @@ std::thread Server::tcpAuthenticatorTh;
 std::vector<RemoteClient*> Server::authenticatedClients;
 std::mutex Server::authenticatedClientsMutex;
 std::thread Server::tcpListenerTh;
+gServer_cbk_interface* Server::serverGameCallback;
+b2World* Server::world;

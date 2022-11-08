@@ -133,10 +133,12 @@
     <ClCompile Include="SFMLDebugDraw.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Box2DUtils.hpp" />
     <ClInclude Include="Client.hpp" />
     <ClInclude Include="Network.hpp" />
     <ClInclude Include="Server.hpp" />
     <ClInclude Include="SFMLDebugDraw.hpp" />
+    <ClInclude Include="Utils.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

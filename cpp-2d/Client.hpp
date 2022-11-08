@@ -1,7 +1,17 @@
 #pragma once
 
+#include <box2d/box2d.h>
+
 #include "Network.hpp"
 
+
+
+class gClient_cbk_interface {
+public:
+	virtual void OnAuth(sf::Packet* packet) = 0;
+	virtual void OnPacket(sf::Packet* packet) = 0;
+
+};
 
 
 class Client {
@@ -9,8 +19,10 @@ public:
 	static int state;
 	static sf::TcpSocket* tcpSocket;
 	static std::thread tcpListenerTh;
+	static gClient_cbk_interface* clientGameCallback;
+	static b2World* world;
 
-	static bool Init(const std::string username, const std::string passwd, const sf::IpAddress ip, const int port)
+	static bool Init(gClient_cbk_interface* callback, const std::string username, const std::string passwd, const sf::IpAddress ip, const int port)
 	{
 		std::cout << "[Client][Info] Starting client..." << std::endl;
 		tcpSocket = new sf::TcpSocket();
@@ -22,8 +34,15 @@ public:
 
 			if (TryAuth(username, passwd))
 			{
+				clientGameCallback = callback;
 				state = RUNNING;
 				tcpListenerTh = std::thread(Client::TCPListener);
+
+				sf::Packet gameInit;
+				tcpSocket->receive(gameInit);
+
+				clientGameCallback->OnAuth(&gameInit);
+
 				return true;
 			}
 			else
@@ -41,6 +60,11 @@ public:
 		}
 	}
 
+	static void Update()
+	{
+
+	}
+
 	static void TCPListener()
 	{
 		while (state == RUNNING)
@@ -48,19 +72,7 @@ public:
 			sf::Packet receivedPacket;
 			if(tcpSocket->receive(receivedPacket) == sf::Socket::Done)
 			{
-				int packetType;
-				receivedPacket >> packetType;
-				if (packetType == PACKET_TYPE_BROADCAST)
-				{
-					std::string brdMsg;
-					receivedPacket >> brdMsg;
-					std::cout << "[Client][Info] A Broadcast packet received from server" << brdMsg << "!" << std::endl;
-
-					sf::Packet broadcastResp;
-					broadcastResp << PACKET_TYPE_BROADCAST;
-					broadcastResp << "sensin aq cocu";
-					tcpSocket->send(broadcastResp);
-				}
+				clientGameCallback->OnPacket(&receivedPacket);
 			}
 			else 
 			{
@@ -127,3 +139,5 @@ public:
 int Client::state = DEINIT;
 sf::TcpSocket* Client::tcpSocket;
 std::thread Client::tcpListenerTh;
+gClient_cbk_interface* Client::clientGameCallback;
+b2World* Client::world;
