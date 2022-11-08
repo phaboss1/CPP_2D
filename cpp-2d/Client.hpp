@@ -8,8 +8,8 @@
 
 class gClient_cbk_interface {
 public:
-	virtual void OnAuth(sf::Packet* packet) = 0;
-	virtual void OnPacket(sf::Packet* packet) = 0;
+	virtual void OnAuth(sf::Packet& packet) = 0;
+	virtual void OnPacket(sf::Packet& packet) = 0;
 
 };
 
@@ -41,7 +41,7 @@ public:
 				sf::Packet gameInit;
 				tcpSocket->receive(gameInit);
 
-				clientGameCallback->OnAuth(&gameInit);
+				clientGameCallback->OnAuth(gameInit);
 
 				return true;
 			}
@@ -72,7 +72,7 @@ public:
 			sf::Packet receivedPacket;
 			if(tcpSocket->receive(receivedPacket) == sf::Socket::Done)
 			{
-				clientGameCallback->OnPacket(&receivedPacket);
+				clientGameCallback->OnPacket(receivedPacket);
 			}
 			else 
 			{

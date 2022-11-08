@@ -63,51 +63,16 @@ public:
 		b2Body* bodyIter = Server::world->GetBodyList();
 		while (bodyIter != nullptr)
 		{
-			// Push Body related data
-			{
-				worldInit << (int)bodyIter->GetType();
-				worldInit << (float)bodyIter->GetPosition().x;
-				worldInit << (float)bodyIter->GetPosition().y;
-				worldInit << (float)bodyIter->GetAngle();
-				worldInit << (float)bodyIter->GetLinearVelocity().x;
-				worldInit << (float)bodyIter->GetLinearVelocity().y;
-				worldInit << (float)bodyIter->GetAngularVelocity();
-				worldInit << (float)bodyIter->GetLinearDamping();
-				worldInit << (float)bodyIter->GetAngularDamping();
-				worldInit << (int)bodyIter->IsFixedRotation();
-			}
-
-			// Push fixture related data
-			{
-				b2Fixture* absoluteFix = bodyIter->GetFixtureList();
-
-				worldInit << absoluteFix->GetFriction();
-				worldInit << absoluteFix->GetRestitution();
-				worldInit << absoluteFix->GetDensity();
-
-				b2Shape::Type type = absoluteFix->GetType();
-				worldInit << type;
-
-				if (type == b2Shape::e_polygon) {
-					b2PolygonShape* poly = (b2PolygonShape*)absoluteFix->GetShape();
-					worldInit << poly->m_count;
-					for (int i = 0; i < poly->m_count; i++)
-					{
-						worldInit << poly->m_vertices[i].x;
-						worldInit << poly->m_vertices[i].y;
-					}
-				}
-			}
+			Box2DUtils::PushBodyAndFixtureCreation(bodyIter, worldInit);
 
 			bodyIter = bodyIter->GetNext();
 		}
-
 		client->socket->send(worldInit);
 	}
 
-	void OnPacket(RemoteClient* client, sf::Packet* packet)
+	void OnPacket(RemoteClient* client, sf::Packet& packet)
 	{
-		std::cout << "a client packet to server" << std::endl;
+		//std::cout << "a client packet to server" << std::endl;
 	}
 };
 
@@ -118,8 +83,8 @@ public:
 
 	ClientGame(sf::RenderWindow* window)
 	{
-		Client::Init(this, Utils::getRandomString(), "123321", "127.0.0.1", 53000);
 		this->window = window;
+		Client::Init(this, Utils::getRandomString(), "123321", "127.0.0.1", 53000);
 	}
 
 	~ClientGame()
@@ -141,18 +106,23 @@ public:
 		}
 	}
 
-	void OnAuth(sf::Packet* packet)
+	void OnAuth(sf::Packet& packet)
 	{
-		std::cout << "a client auth to client" << std::endl;
-
-		Client::world = new b2World(b2Vec2());
+		int packet_type, body_count;
+		float x, y;
+		packet >> packet_type >> x >> y >> body_count;
+		Client::world = new b2World(b2Vec2(x, y));
 
 		// Create Debug Draw
 		debugDraw = new SFMLDebugDraw(window, Client::world, sf::Color::Red);
 		debugDraw->setEnabled(true);
+
+		// Create bodies and fixtures
+		for(int i = 0 ; i < body_count; i++)
+			Box2DUtils::PopBodyAndFixtureCreation(Client::world, packet);
 	}
 
-	void OnPacket(sf::Packet* packet)
+	void OnPacket(sf::Packet& packet)
 	{
 		std::cout << "a client packet to client" << std::endl;
 	}

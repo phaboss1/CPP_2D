@@ -24,7 +24,7 @@ public:
 class gServer_cbk_interface {
 public:
 	virtual void OnAuth(RemoteClient* client) = 0;
-	virtual void OnPacket(RemoteClient* client, sf::Packet* packet) = 0;
+	virtual void OnPacket(RemoteClient* client, sf::Packet& packet) = 0;
 
 };
 
@@ -97,7 +97,7 @@ public:
 
 				if (receiveStatus == sf::Socket::Done)
 				{
-					serverGameCallback->OnPacket(client, &receivedPacket);
+					serverGameCallback->OnPacket(client, receivedPacket);
 
 					iter++;
 				}
