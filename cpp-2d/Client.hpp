@@ -66,11 +66,12 @@ public:
 							{
 								Log("Authentication is successfull!");
 								isAuth = true;
+								callbackInterface->OnConnect();
 							}
 							else
 							{
 								Log("Authentication rejected by server!");
-								DeInit();
+								isInit = false;
 							}
 						}
 						else
@@ -86,9 +87,10 @@ public:
 				}
 				else if (receiveStatus == sf::Socket::Disconnected)
 				{
-					callbackInterface->OnDisconnect();
+					if(isAuth)
+						callbackInterface->OnDisconnect();
 					Log("Connection lost with server!", true);
-					DeInit();
+					isInit = false;
 				}
 				else
 				{
@@ -99,52 +101,13 @@ public:
 			{
 				if (!isLoginRequested)
 				{
-					isLoginRequested = true;
-					CommunicationUtils::SendLoginRequest(tcpSocket, username, password);
+					isLoginRequested = CommunicationUtils::SendLoginRequest(tcpSocket, username, password) == sf::Socket::Status::Done;
 				}
 			}
 		}
+		std::cout << "";
 	}
-
-	static bool TryAuth(const std::string username, const std::string passwd)
-	{
-		sf::Packet loginRequest;
-		loginRequest << PACKET_TYPE_LOGIN_REQUEST;
-		loginRequest << username;
-		loginRequest << passwd;
-
-		if (tcpSocket.send(loginRequest) == sf::Socket::Done)
-		{
-			Log("Login request sent.");
-
-			sf::Packet receivedPacket;
-			if (tcpSocket.receive(receivedPacket) == sf::Socket::Done)
-			{
-				int packetType;
-				receivedPacket >> packetType;
-
-				if (packetType == PACKET_TYPE_LOGIN_RESPONSE)
-				{
-					bool loginStatus;
-					receivedPacket >> loginStatus;
-					return loginStatus;
-				}
-				else
-				{
-					return false;
-				}
-			}
-			else 
-			{
-				return false;
-			}
-		}
-		else
-		{
-			return false;
-		}
-	}
-
+	
 	static bool DeInit()
 	{
 		if (!isInit)
@@ -159,6 +122,7 @@ public:
 		tcpSocket.disconnect();
 		tcpListenerThread.join();
 		callbackInterface = nullptr;
+		Log("Client DeInitialized.");
 		return true;
 	}
 
@@ -170,7 +134,7 @@ public:
 };
 
 bool Client::isInit = false;
-bool Client::isLogging = true;
+bool Client::isLogging = false;
 bool Client::isAuth = false;
 bool Client::isLoginRequested = false;
 std::string Client::username, Client::password;

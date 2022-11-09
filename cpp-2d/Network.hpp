@@ -11,6 +11,7 @@
 #define PACKET_TYPE_LOGIN_REQUEST 0
 #define PACKET_TYPE_LOGIN_RESPONSE 1
 #define PACKET_TYPE_WORLD_INIT 2
+#define PACKET_TYPE_BODY_CREATE 3
 
 class RemoteClient {
 public:
@@ -53,6 +54,26 @@ public:
 };
 
 class CommunicationUtils {
+	// Common
+private:
+	static int ntohs32(const int *input)
+	{
+		int rval;
+		byte *data = (byte *)&rval;
+
+		data[0] = *input >> 24;
+		data[1] = *input >> 16;
+		data[2] = *input >> 8;
+		data[3] = *input >> 0;
+
+		return rval;
+	}
+public:
+	static int GetPacketType(sf::Packet& packet)
+	{
+		return ntohs32((const int*)packet.getData());
+	}
+
 	// Server Side
 public:
 	static sf::Socket::Status SendLoginResponse(RemoteClient* client, bool response)
@@ -64,8 +85,7 @@ public:
 
 	static bool PopLoginRequest(sf::Packet& packet, std::string& username, std::string& password)
 	{
-		const void* data = packet.getData();
-		int packetType = *((int*)data);
+		int packetType = GetPacketType(packet);
 		bool isPacketExpectedType = packetType == PACKET_TYPE_LOGIN_REQUEST;
 		if (isPacketExpectedType)
 			packet >> packetType >> username >> password;
@@ -84,82 +104,51 @@ public:
 
 	static bool PopLoginResponse(sf::Packet& packet, bool& response)
 	{
-		const void* data = packet.getData();
-		int packetType = *((int*)data);
+		int packetType = GetPacketType(packet);
 		bool isPacketExpectedType = packetType == PACKET_TYPE_LOGIN_RESPONSE;
 		if (isPacketExpectedType)
 			packet >> packetType >> response;
 
 		return isPacketExpectedType;
 	}
-
+	
 	// Others
 public:
-	static void CreateRectangleBody(b2World* world, float xPos, float yPos, float width, float height, b2BodyType type)
-	{
-		// Create Ground
-		b2BodyDef bodyDef;
-		bodyDef.position.Set(xPos, yPos);
-		bodyDef.type = type;
-
-		b2Body* rectangleBody = world->CreateBody(&bodyDef);
-
-		b2PolygonShape polygonShape;
-		polygonShape.SetAsBox(width, height);
-		rectangleBody->CreateFixture(&polygonShape, 1.0f);
-	}
-
-	static b2Body* CreateRectangle(b2World* world, float xPos, float yPos, float width, float height, b2BodyType type)
-	{
-		// Create Ground
-		b2BodyDef bodyDef;
-		bodyDef.position.Set(xPos, yPos);
-		bodyDef.type = type;
-
-		b2Body* rectangleBody = world->CreateBody(&bodyDef);
-
-		b2PolygonShape polygonShape;
-		polygonShape.SetAsBox(width, height);
-		rectangleBody->CreateFixture(&polygonShape, 1.0f);
-
-		return rectangleBody;
-	}
-
-	static void PushBodyAndFixtureCreation(b2Body* bodyIter, sf::Packet& worldInit)
+	static void PushBodyAndFixtureCreation(b2Body* bodyIter, sf::Packet& packet)
 	{
 		// Push Body related data
 		{
 			b2Vec2 a = bodyIter->GetPosition();
-			worldInit << (int)bodyIter->GetType();
-			worldInit << (float)bodyIter->GetPosition().x;
-			worldInit << (float)bodyIter->GetPosition().y;
-			worldInit << (float)bodyIter->GetAngle();
-			worldInit << (float)bodyIter->GetLinearVelocity().x;
-			worldInit << (float)bodyIter->GetLinearVelocity().y;
-			worldInit << (float)bodyIter->GetAngularVelocity();
-			worldInit << (float)bodyIter->GetLinearDamping();
-			worldInit << (float)bodyIter->GetAngularDamping();
-			worldInit << (int)bodyIter->IsFixedRotation();
+			packet << (int)bodyIter->GetType();
+			packet << (float)bodyIter->GetPosition().x;
+			packet << (float)bodyIter->GetPosition().y;
+			packet << (float)bodyIter->GetAngle();
+			packet << (float)bodyIter->GetLinearVelocity().x;
+			packet << (float)bodyIter->GetLinearVelocity().y;
+			packet << (float)bodyIter->GetAngularVelocity();
+			packet << (float)bodyIter->GetLinearDamping();
+			packet << (float)bodyIter->GetAngularDamping();
+			packet << (int)bodyIter->IsFixedRotation();
 		}
 
 		// Push fixture related data
 		{
 			b2Fixture* absoluteFix = bodyIter->GetFixtureList();
 
-			worldInit << (float)absoluteFix->GetFriction();
-			worldInit << (float)absoluteFix->GetRestitution();
-			worldInit << (float)absoluteFix->GetDensity();
+			packet << (float)absoluteFix->GetFriction();
+			packet << (float)absoluteFix->GetRestitution();
+			packet << (float)absoluteFix->GetDensity();
 
 			b2Shape::Type type = absoluteFix->GetType();
-			worldInit << (int)type;
+			packet << (int)type;
 
 			if (type == b2Shape::e_polygon) {
 				b2PolygonShape* poly = (b2PolygonShape*)absoluteFix->GetShape();
-				worldInit << (int)poly->m_count;
+				packet << (int)poly->m_count;
 				for (int i = 0; i < poly->m_count; i++)
 				{
-					worldInit << (float)poly->m_vertices[i].x;
-					worldInit << (float)poly->m_vertices[i].y;
+					packet << (float)poly->m_vertices[i].x;
+					packet << (float)poly->m_vertices[i].y;
 				}
 			}
 			else
@@ -169,7 +158,7 @@ public:
 		}
 	}
 
-	static void PopBodyAndFixtureCreation(b2World* world, sf::Packet& worldInit)
+	static void PopBodyAndFixtureCreation(b2World* world, sf::Packet& packet)
 	{
 		b2Body* body;
 		// Pop Body related data and create body
@@ -177,16 +166,16 @@ public:
 			int type, isFixedRot;
 			float x, y, angle, linVelX, linVelY, angVel, linDamp, angDamp;
 
-			worldInit >> type;
-			worldInit >> x;
-			worldInit >> y;
-			worldInit >> angle;
-			worldInit >> linVelX;
-			worldInit >> linVelY;
-			worldInit >> angVel;
-			worldInit >> linDamp;
-			worldInit >> angDamp;
-			worldInit >> isFixedRot;
+			packet >> type;
+			packet >> x;
+			packet >> y;
+			packet >> angle;
+			packet >> linVelX;
+			packet >> linVelY;
+			packet >> angVel;
+			packet >> linDamp;
+			packet >> angDamp;
+			packet >> isFixedRot;
 
 			b2BodyDef bodyDef;
 			bodyDef.type = (b2BodyType)type;
@@ -206,19 +195,19 @@ public:
 			int type, v_count;
 			float friction, restitution, density;
 
-			worldInit >> friction;
-			worldInit >> restitution;
-			worldInit >> density;
-			worldInit >> type;
+			packet >> friction;
+			packet >> restitution;
+			packet >> density;
+			packet >> type;
 
 			if (type == b2Shape::e_polygon)
 			{
-				worldInit >> v_count;
+				packet >> v_count;
 
 				b2Vec2* vertices = (b2Vec2*)malloc(sizeof(b2Vec2) * v_count);
 				for (int i = 0; i < v_count; i++) {
 					float x, y;
-					worldInit >> x >> y;
+					packet >> x >> y;
 					*(vertices + i) = b2Vec2(x, y);
 				}
 

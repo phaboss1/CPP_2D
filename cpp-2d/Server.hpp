@@ -180,8 +180,17 @@ public:
 		tcpAccepter.setBlocking(false);
 		tcpAccepter.close();
 		tcpAccepterThread.join();
+
+		for (RemoteClient* client : remoteClients)
+		{
+			client->socket->disconnect();
+			delete client;
+		}
+		remoteClients.clear();
+
 		tcpListenerThread.join();
 		callbackInterface = nullptr;
+		Log("Server DeInitialized.");
 		return true;
 	}
 
@@ -193,7 +202,7 @@ public:
 };
 
 bool Server::isInit = false;
-bool Server::isLogging = true;
+bool Server::isLogging = false;
 
 sf::Clock Server::serverClock;
 gServer_cbk_interface* Server::callbackInterface;
