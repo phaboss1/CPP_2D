@@ -1,87 +1,107 @@
 #pragma once
 
-#include <box2d/box2d.h>
-
 #include "Network.hpp"
 
 
 
-class gClient_cbk_interface {
-public:
-	virtual void OnAuth(sf::Packet& packet) = 0;
-	virtual void OnPacket(sf::Packet& packet) = 0;
-
-};
-
-
 class Client {
 public:
-	static int state;
-	static sf::TcpSocket* tcpSocket;
-	static std::thread tcpListenerTh;
-	static gClient_cbk_interface* clientGameCallback;
-	static b2World* world;
+	static bool isInit;
+	static bool isLogging;
+	static bool isAuth;
+	static bool isLoginRequested;
+	static std::string username, password;
+	static sf::Clock clientClock;
+	static gClient_cbk_interface* callbackInterface;
 
-	static bool Init(gClient_cbk_interface* callback, const std::string username, const std::string passwd, const sf::IpAddress ip, const int port)
+	static sf::TcpSocket tcpSocket;
+	static std::thread tcpListenerThread;
+	
+	static bool Init(gClient_cbk_interface* callback, const std::string uname, const std::string passwd, const sf::IpAddress ip, const int port)
 	{
-		std::cout << "[Client][Info] Starting client..." << std::endl;
-		tcpSocket = new sf::TcpSocket();
-		sf::Socket::Status status = tcpSocket->connect(ip, port, sf::milliseconds(1000));
+		if (isInit)
+			return false;
 
+		sf::Socket::Status status = tcpSocket.connect(ip, port, sf::milliseconds(1000));
 		if (status == sf::Socket::Done)
 		{
-			std::cout << "[Client][Info] Connected to server..." << std::endl;
-
-			if (TryAuth(username, passwd))
-			{
-				clientGameCallback = callback;
-				state = RUNNING;
-				tcpListenerTh = std::thread(Client::TCPListener);
-
-				sf::Packet gameInit;
-				tcpSocket->receive(gameInit);
-
-				clientGameCallback->OnAuth(gameInit);
-
-				return true;
-			}
-			else
-			{
-				DeInit();
-				return false;
-			}
+			isInit = true;
+			isAuth = false;
+			isLoginRequested = false;
+			callbackInterface = callback;
+			username = uname;
+			password = passwd;
+			Log("Starting tcp listener thread and authentication process.");
+			tcpListenerThread = std::thread(Client::TCPListener);
+			return true;
 		}
-		else
+		else // [TODO] Maybe can return NotReady
 		{
-			std::cout << "[Client][Error] Can not bound to TCP port!" << std::endl;
-			tcpSocket->disconnect();
-			state = DEINIT;
+			Log("Can not bound to TCP port!", true);
 			return false;
-		}
-	}
-
-	static void Update()
-	{
-		if (Client::state == RUNNING)
-		{
-			world->Step(1.f / 60.f, 6, 2);
 		}
 	}
 
 	static void TCPListener()
 	{
-		while (state == RUNNING)
+		while (isInit)
 		{
-			sf::Packet receivedPacket;
-			if(tcpSocket->receive(receivedPacket) == sf::Socket::Done)
+			if (isAuth || isLoginRequested)
 			{
-				clientGameCallback->OnPacket(receivedPacket);
+				sf::Packet receivedPacket;
+				sf::Socket::Status receiveStatus = tcpSocket.receive(receivedPacket);
+				if (receiveStatus == sf::Socket::Done)
+				{
+					if (isAuth)
+					{
+						callbackInterface->OnReceive(receivedPacket);
+					}
+					else  if (isLoginRequested)
+					{
+						bool response;
+						if (CommunicationUtils::PopLoginResponse(receivedPacket, response))
+						{
+							
+							if (response)
+							{
+								Log("Authentication is successfull!");
+								isAuth = true;
+							}
+							else
+							{
+								Log("Authentication rejected by server!");
+								DeInit();
+							}
+						}
+						else
+						{
+							Log("Expected LoginResponse packet from server but it was not!", true);
+						}
+					}
+
+				}
+				else if (receiveStatus == sf::Socket::Error || receiveStatus == sf::Socket::Partial || receiveStatus == sf::Socket::NotReady)
+				{
+					// [TODO] Don't know how to handle, not sure if all can happen
+				}
+				else if (receiveStatus == sf::Socket::Disconnected)
+				{
+					callbackInterface->OnDisconnect();
+					Log("Connection lost with server!", true);
+					DeInit();
+				}
+				else
+				{
+					// Not possible to reachable at all
+				}
 			}
 			else 
 			{
-				// Connection lost, packet corrupted???
-				std::cout << "[Client][Error] Connection lost with server!" << std::endl;
-				DeInit();
+				if (!isLoginRequested)
+				{
+					isLoginRequested = true;
+					CommunicationUtils::SendLoginRequest(tcpSocket, username, password);
+				}
 			}
 		}
 	}
@@ -93,12 +113,12 @@ public:
 		loginRequest << username;
 		loginRequest << passwd;
 
-		if (tcpSocket->send(loginRequest) == sf::Socket::Done)
+		if (tcpSocket.send(loginRequest) == sf::Socket::Done)
 		{
-			std::cout << "[Client][Info] Login request sent..." << std::endl;
+			Log("Login request sent.");
 
 			sf::Packet receivedPacket;
-			if (tcpSocket->receive(receivedPacket) == sf::Socket::Done)
+			if (tcpSocket.receive(receivedPacket) == sf::Socket::Done)
 			{
 				int packetType;
 				receivedPacket >> packetType;
@@ -127,20 +147,34 @@ public:
 
 	static bool DeInit()
 	{
-		if (state != RUNNING)
+		if (!isInit)
 			return false;
 
-		state = DEINIT;
-		tcpSocket->setBlocking(false);
-		tcpSocket->disconnect();
-		tcpListenerTh.join();
-
+		isInit = false;
+		isAuth = false;
+		isLoginRequested = false;
+		username = "";
+		password = "";
+		tcpSocket.setBlocking(false);
+		tcpSocket.disconnect();
+		tcpListenerThread.join();
+		callbackInterface = nullptr;
 		return true;
+	}
+
+	static void Log(const char* log, bool isError = false)
+	{
+		if (isLogging)
+			std::cout << "[CLIENT]" << (isError ? " [ERROR] " : " [INFO] ") << log << std::endl;
 	}
 };
 
-int Client::state = DEINIT;
-sf::TcpSocket* Client::tcpSocket;
-std::thread Client::tcpListenerTh;
-gClient_cbk_interface* Client::clientGameCallback;
-b2World* Client::world;
+bool Client::isInit = false;
+bool Client::isLogging = true;
+bool Client::isAuth = false;
+bool Client::isLoginRequested = false;
+std::string Client::username, Client::password;
+gClient_cbk_interface* Client::callbackInterface;
+
+sf::TcpSocket Client::tcpSocket;
+std::thread Client::tcpListenerThread;

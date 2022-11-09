@@ -8,22 +8,16 @@
 #include "SFMLDebugDraw.hpp"
 #include "Server.hpp"
 #include "Client.hpp"
-#include "Box2DUtils.hpp"
 
 
 
 
 class ServerGame : public gServer_cbk_interface {
 public:
-	
+	b2World* world;
 	ServerGame()
 	{
-		Server::Init(53000, this);
-
-		if (Server::state == RUNNING)
-		{
-			Box2DUtils::CreateRectangle(Server::world, 15, 18, 7, 1.f, b2_staticBody);
-		}
+		
 	}
 
 	~ServerGame()
@@ -33,110 +27,105 @@ public:
 
 	void Update()
 	{
-		Server::Update();
+		world->Step(1.f / 60.f, 6, 2);
 	}
 
-	void OnAuth(RemoteClient* client)
+	void OnServerInit()
 	{
-		while (Server::world->IsLocked());
-		client->body = Box2DUtils::CreateRectangle(Server::world, 300 / BOX2D_SCALE, 100 / BOX2D_SCALE, 31 / BOX2D_SCALE / 2, 49 / BOX2D_SCALE / 2, b2_dynamicBody);
-		for (RemoteClient* c : Server::authenticatedClients)
-		{
-			/*sf::Packet p;
-			c->socket->send();*/
-		}
-
-		sf::Packet worldInit;
-		worldInit << PACKET_TYPE_WORLD_INIT;
-		worldInit << 0.f << 9.8f; // gravity
-
-		worldInit << Server::world->GetBodyCount();
-
-		b2Body* bodyIter = Server::world->GetBodyList();
-		while (bodyIter != nullptr)
-		{
-			Box2DUtils::PushBodyAndFixtureCreation(bodyIter, worldInit);
-
-			bodyIter = bodyIter->GetNext();
-		}
-		client->socket->send(worldInit);
+		std::cout << "[ServerGame][Info] OnServerInit!" << std::endl;
+		world = new b2World(b2Vec2(0, 0));
 	}
 
-	void OnPacket(RemoteClient* client, sf::Packet& packet)
+	void OnClientLogin(RemoteClient* client)
 	{
-		//std::cout << "a client packet to server" << std::endl;
+		std::cout << "[ServerGame][Info] OnClientLogin!" << std::endl;
+	}
+
+	void OnClientDisconnect(RemoteClient* client)
+	{
+		std::cout << "[ServerGame][Info] OnClientDisconnect!." << std::endl;
+	}
+
+	void OnClientReceive(RemoteClient* client, sf::Packet& packet)
+	{
+		std::cout << "[ServerGame][Info] OnClientReceive!" << std::endl;
 	}
 };
 
 class ClientGame : public gClient_cbk_interface {
 public:
+	b2World* world;
 	SFMLDebugDraw* debugDraw;
 	sf::RenderWindow* window;
+	bool isPlaying;
+	bool isGameEnded;
 
 	ClientGame(sf::RenderWindow* window)
 	{
 		this->window = window;
-		Client::Init(this, Utils::getRandomString(), "123321", "127.0.0.1", 53000);
+		this->isPlaying = false;
+		this->isGameEnded = false;
 	}
 
 	~ClientGame()
 	{
-		Client::DeInit();
+		
 	}
 
 	void Update()
 	{
-		Client::Update();
+		if (isPlaying)
+		{
+			world->Step(1.f / 60.f, 6, 2);
+		}
 	}
 
 	void Render()
 	{
-		if (Client::state == RUNNING)
+		if (isPlaying)
 		{
 			// Render DebugDraw
 			debugDraw->Render();
 		}
 	}
 
-	void OnAuth(sf::Packet& packet)
+	void OnConnect() // There is not use case I can think of right now
 	{
-		int packet_type, body_count;
-		float x, y;
-		packet >> packet_type >> x >> y >> body_count;
-		Client::world = new b2World(b2Vec2(x, y));
-
-		// Create Debug Draw
-		debugDraw = new SFMLDebugDraw(window, Client::world, sf::Color::Red);
-		debugDraw->setEnabled(true);
-
-		// Create bodies and fixtures
-		for(int i = 0 ; i < body_count; i++)
-			Box2DUtils::PopBodyAndFixtureCreation(Client::world, packet);
+		std::cout << "[ClientGame][Info] OnConnect!" << std::endl;
 	}
 
-	void OnPacket(sf::Packet& packet)
+	void OnDisconnect()
 	{
-		std::cout << "a client packet to client" << std::endl;
+		std::cout << "[ClientGame][Info] OnDisconnect!" << std::endl;
+		isPlaying = false;
+	}
+
+	void OnReceive(sf::Packet& packet)
+	{
+		std::cout << "[ClientGame][Info] OnReceive!" << std::endl;
 	}
 };
 
 sf::RenderWindow* window;
 int main()
 {
-	// Server
-	ServerGame * serverGame = new ServerGame();
-	
 	// Create Window
 	window = new sf::RenderWindow(sf::VideoMode(800, 600), "Hello World");
+
+	// Create Server
+	ServerGame * serverGame = new ServerGame();
+	Server::Init(serverGame, 53000);
 	
 	// Create Client
 	ClientGame* clientGame = new ClientGame(window);
+	Client::Init(clientGame, Utils::getRandomString(), "123321", "127.0.0.1", 53000);
 
-	while (window->isOpen() && Client::state == RUNNING)
+	while (window->isOpen() && (clientGame->isPlaying || Client::isInit))
 	{
 		// Update
 		{
-			serverGame->Update();
+			if(Server::isInit)
+				serverGame->Update();
 
 			clientGame->Update();
 		}
@@ -167,7 +156,10 @@ int main()
 	}
 
 	delete serverGame;
+	Server::DeInit();
+
+	Client::DeInit();
 	delete clientGame;
-	
+
 	return 0;
 }

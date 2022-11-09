@@ -1,225 +1,207 @@
 #pragma once
 
 #include "Network.hpp"
-#include <box2d/box2d.h>
 
-
-
-class RemoteClient {
-public:
-	sf::TcpSocket* socket;
-	std::string username;
-	b2Body* body;
-
-	RemoteClient()
-	{
-		this->socket = new sf::TcpSocket();
-	}
-
-	~RemoteClient()
-	{
-		delete this->socket;
-	}
-};
-
-class gServer_cbk_interface {
-public:
-	virtual void OnAuth(RemoteClient* client) = 0;
-	virtual void OnPacket(RemoteClient* client, sf::Packet& packet) = 0;
-
-};
 
 
 class Server {
 public:
-	static int state;
-	static sf::TcpListener tcpAuthenticator;
-	static std::thread tcpAuthenticatorTh;
-	static std::thread tcpListenerTh;
-	static std::vector<RemoteClient*> authenticatedClients;
-	static std::mutex authenticatedClientsMutex;
-	static gServer_cbk_interface* serverGameCallback;
-	static b2World* world;
+	static bool isInit;
+	static bool isLogging;
+	static sf::Clock serverClock;
+	static gServer_cbk_interface* callbackInterface;
 
-	static bool Init(const int tcpPort, gServer_cbk_interface* cbk)
+	static sf::TcpListener tcpAccepter;
+	static std::thread tcpAccepterThread;
+
+	static std::thread tcpListenerThread;
+
+	static std::vector<RemoteClient*> remoteClients;
+	static std::mutex remoteClientsMutex;
+
+	static bool Init(gServer_cbk_interface* callback, const int tcpPort)
 	{
-		if (state != DEINIT)
+		if (isInit)
 			return false;
 
-		std::cout << "[Server][Info] Starting server..." << std::endl;
-
-		sf::Socket::Status tcpStatus = tcpAuthenticator.listen(tcpPort);
-
+		sf::Socket::Status tcpStatus = tcpAccepter.listen(tcpPort);
 		if (tcpStatus == sf::Socket::Done)
 		{
-			world = new b2World(b2Vec2(0, 9.8f));
-			serverGameCallback = cbk;
-			state = RUNNING;
-			tcpAuthenticatorTh = std::thread(Server::TCPAuthenticator);
-			tcpListenerTh = std::thread(Server::TCPListener);
+			isInit = true;
+			callbackInterface = callback;
+			Log("Starting tcp accepter and tcp listener threads.");
+			callbackInterface->OnServerInit();
+			tcpAccepterThread = std::thread(Server::TCPAccepter);
+			tcpListenerThread = std::thread(Server::TCPListener);
 			return true;
 		}
-		else
+		else // [TODO] Maybe can return NotReady
 		{
-			std::cout << "[Server][Error] TCP port already in bound!" << std::endl;
-			state = DEINIT;
+			Log("TCP port already in bound!", true);
 			return false;
 		}
 	}
-
-	static void Update()
-	{
-		if (Server::state == RUNNING)
-		{
-			world->Step(1.f / 60.f, 6, 2);
-		}
-	}
-
+	
+	// This is big, I mean "BIG", but handles all cases smoothly
 	static void TCPListener()
 	{
-		std::cout << "[Server][Info] TCP Listener stating..." << std::endl;
-
-		while (state == RUNNING)
+		while (isInit)
 		{
-			bool broadcast = false;
-			static sf::Clock c;
-			if (c.getElapsedTime().asMilliseconds() >= 2500)
-			{
-				c.restart();
-				broadcast = true;
-			}
-
-			authenticatedClientsMutex.lock();
-			for (std::vector<RemoteClient*>::iterator iter = authenticatedClients.begin(); iter != authenticatedClients.end(); )
+			remoteClientsMutex.lock();
+			sf::Time currentTime = serverClock.getElapsedTime();
+			for (std::vector<RemoteClient*>::iterator iter = remoteClients.begin(); iter != remoteClients.end(); )
 			{
 				RemoteClient* client = *iter;
+
 				sf::Packet receivedPacket;
 				sf::Socket::Status receiveStatus = client->socket->receive(receivedPacket);
-
-				if (receiveStatus == sf::Socket::Done)
+				if (receiveStatus == sf::Socket::Status::Done || receiveStatus == sf::Socket::Status::NotReady)
 				{
-					serverGameCallback->OnPacket(client, receivedPacket);
-
+					if (receiveStatus == sf::Socket::Status::Done)
+					{
+						client->lastReceive = serverClock.getElapsedTime();
+						if (client->isAuth)
+						{
+							Log("A packet received from authenticated client.");
+							callbackInterface->OnClientReceive(client, receivedPacket);
+							iter++;
+						}
+						else 
+						{
+							std::string username, password;
+							if (CommunicationUtils::PopLoginRequest(receivedPacket, username, password))
+							{
+								if (1)
+								{
+									Log("An Authentication request accepted.");
+									client->isAuth = true;
+									client->username = username;
+									CommunicationUtils::SendLoginResponse(client, true);
+									callbackInterface->OnClientLogin(client);
+									iter++;
+								}
+								else 
+								{
+									Log("An Authentication request rejected.");
+									CommunicationUtils::SendLoginResponse(client, false);
+									delete client;
+									iter = remoteClients.erase(iter);
+								}
+							}
+							else 
+							{
+								Log("Expected LoginRequest packet from a not authenticated client but it was not!", true);
+								iter++;
+							}
+						}
+					}
+					else if(receiveStatus == sf::Socket::Status::NotReady)
+					{
+						if (client->isAuth)
+						{
+							// Nothing to be done except waiting for new packet
+							iter++;
+						}
+						else 
+						{
+							if (currentTime.asMilliseconds() >= 1000 + client->lastReceive.asMilliseconds()) // 1 second for timeout the client
+							{
+								Log("Authentication with a client timed-out.");
+								delete client;
+								iter = remoteClients.erase(iter);
+							}
+							else
+							{
+								//Log(std::string("Authentication timeout event running for a client ").append(std::to_string(1000 + client->lastReceive.asMilliseconds() - currentTime.asMilliseconds())).append(" ms left.").c_str());
+								iter++;
+							}
+						}
+					}
+					else 
+					{
+						// Not possible to reachable at all
+					}
+				}
+				else if (receiveStatus == sf::Socket::Status::Error || receiveStatus == sf::Socket::Status::Partial) // Don't know how to handle both [TODO]
+				{
+					Log("Unknown receive status! Discarding the packet!", true);
 					iter++;
 				}
-				else if (receiveStatus == sf::Socket::NotReady)
+				else if (receiveStatus == sf::Socket::Status::Disconnected)
 				{
-					iter++;
-				}
-				else 
-				{
-					std::cout << "[Server][Info] Connection lost with a client..." << std::endl;
-					// Disconnected probably
+					if (client->isAuth)
+					{
+						Log("Connection lost with a authenticated client.");
+						callbackInterface->OnClientDisconnect(client);
+					}
+					else
+					{
+						Log("Connection lost with a not authenticated client.");
+					}
 					delete client;
-					iter = authenticatedClients.erase(iter);
+					iter = remoteClients.erase(iter);
 				}
-
+				else
+				{
+					// Not possible to reachable at all
+				}
 			}
-			authenticatedClientsMutex.unlock();			
+			remoteClientsMutex.unlock();			
 		}
 	}
 
-	static void TCPAuthenticator()
+	static void TCPAccepter()
 	{
-		std::cout << "[Server][Info] TCP Authenticator stating..." << std::endl;
-
-		while (state == RUNNING)
+		while (isInit)
 		{
-			RemoteClient* client = new RemoteClient();
-			if (tcpAuthenticator.accept(*client->socket) == sf::Socket::Done) // if tcp handshake
+			sf::TcpSocket* socket = new sf::TcpSocket();
+			sf::Socket::Status acceptStatus = tcpAccepter.accept(*socket);
+			if (acceptStatus == sf::Socket::Done)
 			{
-				std::cout << "[Server][Info] A new client is accepted..." << std::endl;
-
-				if (TryAuth(client))
-				{
-					authenticatedClientsMutex.lock();
-					authenticatedClients.push_back(client);
-					// Call cbk
-					serverGameCallback->OnAuth(client);
-					client->socket->setBlocking(false);
-					authenticatedClientsMutex.unlock();
-					std::cout << "[Server][Info] Successfully auth a client..." << std::endl;
-				}
-				else 
-				{
-					std::cout << "[Server][Info] Couldn't auth a client..." << std::endl;
-					delete client;
-				}
+				Log("A new client is accepted...");
+				socket->setBlocking(false);
+				remoteClientsMutex.lock();
+				remoteClients.push_back(new RemoteClient(socket, serverClock.getElapsedTime()));
+				remoteClientsMutex.unlock();
 			}
-			else
+			else //if(acceptStatus == sf::Socket::Status::NotReady || acceptStatus == sf::Socket::Status::Error || acceptStatus == sf::Socket::Status::Partial || acceptStatus == sf::Socket::Status::Disconnected) // [TODO] Not sure how to handle rest, maybe only not_ready can be received, maybe none
 			{
-				std::cout << "[Server][Info] Error while authenticating a client..." << std::endl;
-				delete client;
+				delete socket;
 			}
-		}
-	}
-
-	static bool TryAuth(RemoteClient* client)
-	{
-		sf::Packet loginRequest;
-		if (client->socket->receive(loginRequest) == sf::Socket::Done)
-		{
-			int packetType;
-			loginRequest >> packetType;
-			if (packetType == PACKET_TYPE_LOGIN_REQUEST)
-			{
-				std::string uname, passwd;
-				loginRequest >> uname >> passwd;
-				std::cout << "[Server][Info] Login request recived from " << uname << ":" << passwd << "..." << std::endl;
-
-				sf::Packet responsePacket;
-				responsePacket << PACKET_TYPE_LOGIN_RESPONSE;
-
-				bool isAuth;
-				if (1)
-				{
-					isAuth = true;
-					client->username = uname;
-				}
-				else 
-				{
-					isAuth = false;
-					std::cout << "[Server][Info] User not found..." << std::endl;
-				}
-
-				responsePacket << isAuth;
-				client->socket->send(responsePacket);
-
-				return isAuth;
-			}
-			else
-			{
-				return false;
-			}
-		}
-		else
-		{
-			return false;
 		}
 	}
 
 	static bool DeInit()
 	{
-		if (state != RUNNING)
+		if (!isInit)
 			return false;
 
-		state = DEINIT;
-
-		tcpAuthenticator.setBlocking(false);
-		tcpAuthenticator.close();
-		tcpAuthenticatorTh.join();
-
-		tcpListenerTh.join();
-		
+		isInit = false;
+		tcpAccepter.setBlocking(false);
+		tcpAccepter.close();
+		tcpAccepterThread.join();
+		tcpListenerThread.join();
+		callbackInterface = nullptr;
 		return true;
+	}
+
+	static void Log(const char* log, bool isError = false)
+	{
+		if (isLogging)
+			std::cout << "[SERVER]" << (isError ? " [ERROR] " : " [INFO] ") << log << std::endl;
 	}
 };
 
-int Server::state = DEINIT;
-sf::TcpListener Server::tcpAuthenticator;
-std::thread Server::tcpAuthenticatorTh;
-std::vector<RemoteClient*> Server::authenticatedClients;
-std::mutex Server::authenticatedClientsMutex;
-std::thread Server::tcpListenerTh;
-gServer_cbk_interface* Server::serverGameCallback;
-b2World* Server::world;
+bool Server::isInit = false;
+bool Server::isLogging = true;
+
+sf::Clock Server::serverClock;
+gServer_cbk_interface* Server::callbackInterface;
+
+sf::TcpListener Server::tcpAccepter;
+std::thread Server::tcpAccepterThread;
+
+std::thread Server::tcpListenerThread;
+
+std::vector<RemoteClient*> Server::remoteClients;
+std::mutex Server::remoteClientsMutex;

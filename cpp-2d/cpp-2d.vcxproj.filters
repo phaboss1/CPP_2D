@@ -38,9 +38,6 @@
     <ClInclude Include="Network.hpp">
       <Filter>Source Files\Networking</Filter>
     </ClInclude>
-    <ClInclude Include="Box2DUtils.hpp">
-      <Filter>Source Files\Networking</Filter>
-    </ClInclude>
     <ClInclude Include="Utils.hpp">
       <Filter>Source Files</Filter>
     </ClInclude>
