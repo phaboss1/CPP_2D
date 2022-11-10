@@ -16,6 +16,9 @@
     <Filter Include="Source Files\Networking">
       <UniqueIdentifier>{325cd5ba-7b7b-47fc-92d1-f5fead730eb1}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Rendering">
+      <UniqueIdentifier>{92fd9fde-6f59-417c-a930-131b1533c532}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Main.cpp">
@@ -40,6 +43,9 @@
     </ClInclude>
     <ClInclude Include="Utils.hpp">
       <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="AssimpUtils.hpp">
+      <Filter>Source Files\Rendering</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
