@@ -6,200 +6,215 @@
 #include <SFML/Graphics.hpp>
 #include <box2d/box2d.h>
 
-#include <Windows.h>
-#include <stdlib.h>
-#include <time.h>
+#include "Utils.hpp"
 
 #include "SFMLDebugDraw.hpp"
 #include "Server.hpp"
 #include "Client.hpp"
 
+#include "AssimpUtils.hpp"
 
 
-using namespace std;
+class ServerGame : public gServer_cbk_interface {
+public:
+	b2World* world;
 
-#define CAMERA_SPEED 0.1f * 10
+	ServerGame()
+	{
+		
+	}
 
-b2World* physicsWorld;
+	~ServerGame()
+	{
+		Server::DeInit();
+	}
+
+	void Update()
+	{
+		world->Step(1.f / 60.f, 6, 2);
+	}
+
+	void OnServerInit() // Only this is called from main thread
+	{
+		std::cout << "[ServerGame][Info] OnServerInit!" << std::endl;
+		world = new b2World(b2Vec2(0, 9.807f));
+		Box2DUtils::CreateRectangle(world, 15, 18, 7, 1.f, b2_staticBody);
+	}
+
+	void OnClientLogin(RemoteClient* client)
+	{
+		std::cout << "[ServerGame][Info] OnClientLogin!" << std::endl;
+
+		sf::Packet worldInit;
+		worldInit << PACKET_TYPE_WORLD_INIT;
+		worldInit << world->GetGravity().x << world->GetGravity().y;
+
+		worldInit << world->GetBodyCount();
+
+		b2Body* bodyIter = world->GetBodyList();
+		while (bodyIter != nullptr)
+		{
+			CommunicationUtils::PushBodyAndFixtureCreation(bodyIter, worldInit);
+
+			bodyIter = bodyIter->GetNext();
+		}
+		while (client->socket->send(worldInit) != sf::Socket::Status::Done);
+
+		while (world->IsLocked());
+		client->body = Box2DUtils::CreateRectangle(world, 300 / BOX2D_SCALE, 100 / BOX2D_SCALE, 31 / BOX2D_SCALE / 2, 49 / BOX2D_SCALE / 2, b2_dynamicBody);
+		sf::Packet bodyCreation;
+		bodyCreation << PACKET_TYPE_BODY_CREATE;
+		CommunicationUtils::PushBodyAndFixtureCreation(client->body, bodyCreation);
+		for (RemoteClient* c : Server::remoteClients)
+			while (c->socket->send(bodyCreation) != sf::Socket::Status::Done);
+	}
+
+	void OnClientDisconnect(RemoteClient* client)
+	{
+		std::cout << "[ServerGame][Info] OnClientDisconnect!" << std::endl;
+	}
+
+	void OnClientReceive(RemoteClient* client, sf::Packet& packet)
+	{
+		std::cout << "[ServerGame][Info] OnClientReceive!" << std::endl;
+	}
+};
+
+class ClientGame : public gClient_cbk_interface {
+public:
+	b2World* world;
+	SFMLDebugDraw* debugDraw;
+	sf::RenderWindow* window;
+	bool isPlaying;
+	bool isGameEnded;
+
+	ClientGame(sf::RenderWindow* window)
+	{
+		this->window = window;
+		this->isPlaying = false;
+		this->isGameEnded = false;
+	}
+
+	~ClientGame()
+	{
+		
+	}
+
+	void Update()
+	{
+		if (isPlaying)
+		{
+			world->Step(1.f / 60.f, 6, 2);
+		}
+	}
+
+	void Render()
+	{
+		if (isPlaying)
+		{
+			// Render DebugDraw
+			debugDraw->Render();
+		}
+	}
+
+	void OnConnect() // There is not use case I can think of right now
+	{
+		std::cout << "[ClientGame][Info] OnConnect!" << std::endl;
+	}
+
+	void OnDisconnect()
+	{
+		std::cout << "[ClientGame][Info] OnDisconnect!" << std::endl;
+		isPlaying = false;
+	}
+
+	void OnReceive(sf::Packet& packet)
+	{
+		std::cout << "[ClientGame][Info] OnReceive!" << std::endl;
+
+		int packetType = CommunicationUtils::GetPacketType(packet);
+		if (packetType == PACKET_TYPE_WORLD_INIT)
+		{
+			int packet_type, body_count;
+			float x, y;
+			packet >> packet_type >> x >> y >> body_count;
+			world = new b2World(b2Vec2(x, y));
+
+			// Create Debug Draw
+			debugDraw = new SFMLDebugDraw(window, world, sf::Color::Red);
+			debugDraw->setEnabled(true);
+
+			// Create bodies and fixtures
+			for (int i = 0; i < body_count; i++)
+				CommunicationUtils::PopBodyAndFixtureCreation(world, packet);
+
+			isPlaying = true;
+		}
+		else if (packetType == PACKET_TYPE_BODY_CREATE)
+		{
+			int packet_type;
+			packet >> packet_type;
+
+			CommunicationUtils::PopBodyAndFixtureCreation(world, packet);
+		}
+		
+	}
+};
+
 sf::RenderWindow* window;
-SFMLDebugDraw* debugDraw;
-sf::Vector2f cameraPosition;
-sf::Sprite playerSprite;
-b2Body* playerBody;
-
-bool qKeyFlag = true;
-
-std::string getRandomString()
-{
-	srand((unsigned int)time(NULL));
-
-	std::string retVal;
-	for (int i = 0; i < 5; i++)
-		retVal += (char)(rand() % 25 + 65);
-	return retVal;
-}
-
-string getCurrentDirectory()
-{
-	// Get current path
-	TCHAR buffer[MAX_PATH] = { 0 };
-	GetModuleFileName(NULL, buffer, MAX_PATH);
-	std::string currentDir = buffer;
-	currentDir = currentDir.substr(0, currentDir.find_last_of('\\'));
-	return currentDir;
-}
-
-b2Body* CreateRectangle(float xPos, float yPos, float width, float height, b2BodyType type)
-{
-	// Create Ground
-	b2BodyDef bodyDef;
-	bodyDef.position.Set(xPos, yPos);
-	bodyDef.type = type;
-
-	b2Body* rectangleBody = physicsWorld->CreateBody(&bodyDef);
-
-	b2PolygonShape polygonShape;
-	polygonShape.SetAsBox(width, height);
-	rectangleBody->CreateFixture(&polygonShape, 1.0f);
-
-	return rectangleBody;
-}
-
-b2Body* CreateCircle(float xPos, float yPos, float radius, b2BodyType type)
-{
-	// Create Ground
-	b2BodyDef bodyDef;
-	bodyDef.position.Set(xPos, yPos);
-	bodyDef.type = type;
-
-	b2Body* circleBody = physicsWorld->CreateBody(&bodyDef);
-
-	b2CircleShape circleShape;
-	circleShape.m_radius = radius;
-	circleBody->CreateFixture(&circleShape, 1.0f);
-
-	return circleBody;
-}
-
-void HandleEvents()
-{
-	// Enable/Disable Debug Draw
-	if (sf::Keyboard::isKeyPressed(sf::Keyboard::Q) && qKeyFlag)
-	{
-		qKeyFlag = false;
-		debugDraw->setEnabled(!debugDraw->IsDebugDrawEnabled());
-	}
-	else if (!sf::Keyboard::isKeyPressed(sf::Keyboard::Q))
-	{
-		qKeyFlag = true;
-	}
-
-	// Create Circle on Mousepress
-	{
-		static bool createFlag = true;
-		if (sf::Mouse::isButtonPressed(sf::Mouse::Left) && createFlag)
-		{
-			createFlag = false;
-			
-			sf::Vector2i mousePosition = sf::Mouse::getPosition() - window->getPosition();
-			CreateCircle(mousePosition.x / BOX2D_SCALE, mousePosition.y / BOX2D_SCALE, 0.5f, b2_dynamicBody);
-		}
-		else if(!sf::Mouse::isButtonPressed(sf::Mouse::Left))
-		{
-			createFlag = true;
-		}
-	}
-
-	// Move Player
-	{
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::A))
-			playerBody->SetLinearVelocity(b2Vec2(playerBody->GetLinearVelocity().x  -1, playerBody->GetLinearVelocity().y));
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::D))
-			playerBody->SetLinearVelocity(b2Vec2(playerBody->GetLinearVelocity().x + 1, playerBody->GetLinearVelocity().y));
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Space))
-			playerBody->SetLinearVelocity(b2Vec2(playerBody->GetLinearVelocity().x, playerBody->GetLinearVelocity().y - 5));
-	}
-
-	// Camera movement
-	{
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
-			cameraPosition.x -= CAMERA_SPEED;
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
-			cameraPosition.x += CAMERA_SPEED;
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
-			cameraPosition.y += CAMERA_SPEED;
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
-			cameraPosition.y -= CAMERA_SPEED;
-	}
-
-	// Iterate all event
-	sf::Event event;
-	while (window->pollEvent(event))
-	{
-		// Get close window event
-		if (event.type == sf::Event::Closed)
-			window->close();
-	}
-}
-
 int main()
 {
-	Server::Init(53000);
-	Client::Init(getRandomString(), "123321", "127.0.0.1", 53000);
-
-	// Set camera to 0,0
-	cameraPosition.x = 0;
-	cameraPosition.y = 0;
-
-	// Create Box2D world
-	physicsWorld = new b2World(b2Vec2(0,9.807f));
-
-	// Create Ground
-	CreateRectangle(15, 18, 7, 1.f, b2_staticBody);
-
 	// Create Window
 	window = new sf::RenderWindow(sf::VideoMode(800, 600), "Hello World");
 
-	// Create Debug Draw
-	debugDraw = new SFMLDebugDraw(window, physicsWorld, sf::Color::Red);
-	debugDraw->setEnabled(true);
+	// Create Server
+	ServerGame * serverGame = new ServerGame();
+	Server::Init(serverGame, 53000);
+	
+	// Create Client
+	ClientGame* clientGame = new ClientGame(window);
+	Client::Init(clientGame, Utils::getRandomString(), "123321", "127.0.0.1", 53000);
 
-	// Create Player
-	sf::Texture playerTexture;
-	playerTexture.loadFromFile(getCurrentDirectory() + "/player.png");
-	playerSprite.setTexture(playerTexture);
-	playerBody = CreateRectangle(300 / BOX2D_SCALE, 100 / BOX2D_SCALE, 31 / BOX2D_SCALE / 2, 49 / BOX2D_SCALE / 2, b2_dynamicBody);
-	playerBody->SetFixedRotation(true);
-
-	while (window->isOpen())
+	while (window->isOpen() && (clientGame->isPlaying || Client::isInit))
 	{
-		// Update Physics World
-		physicsWorld->Step(1.f / 60.f, 6, 2);	
+		// Update
+		{
+			if(Server::isInit)
+				serverGame->Update();
 
-		// Update Player sprite position with physics
-		playerSprite.setPosition(playerBody->GetPosition().x * BOX2D_SCALE - 31 / 2.f - cameraPosition.x, playerBody->GetPosition().y * BOX2D_SCALE - 49 / 2.f - cameraPosition.y);
+			clientGame->Update();
+		}
 
-		// Clear Screen
-		window->clear();
+		// Rendering
+		{
+			// Clear Screen
+			window->clear();
 
-		// Render DebugDraw
-		debugDraw->Render(cameraPosition);
+			// Render Client Game
+			clientGame->Render();
 
-		// Render Player
-		window->draw(playerSprite);
+			// Flush Everything
+			window->display();
+		}
 
-		// Render Everything
-		window->display();
-
-		// Handle All Events + Keyboard + Mouse
-		HandleEvents();
+		// Iterate all event
+		sf::Event event;
+		while (window->pollEvent(event))
+		{
+			// Get close window event
+			if (event.type == sf::Event::Closed)
+				window->close();
+		}
 
 		// Wait 16ms for 60 fps
 		sf::sleep(sf::milliseconds(16));
 	}
 
+	delete serverGame;
 	Server::DeInit();
+
 	Client::DeInit();
+	delete clientGame;
 
 	return 0;
 }
